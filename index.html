@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Estimación de Parámetros - Distribuciones Continuas</title>
+
+<!-- Tailwind CSS -->
+
+<script src="https://cdn.tailwindcss.com"></script>
+
+<!-- Chart.js -->
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+body{
+    background: #f1f5f9;
+}
+.card{
+    background:white;
+    border-radius:16px;
+    padding:20px;
+    box-shadow:0 4px 12px rgba(0,0,0,0.08);
+}
+</style>
+
+</head>
+<body class="min-h-screen p-6">
+
+<div class="max-w-7xl mx-auto">
+
+```
+<div class="text-center mb-6">
+    <h1 class="text-4xl font-bold text-slate-800">
+        Estimación de Parámetros para Distribuciones Continuas
+    </h1>
+    <p class="text-slate-600 mt-2">
+        Proyecto Universitario - Estadística y Ciencia de Datos
+    </p>
+</div>
+
+<!-- Entrada -->
+<div class="card mb-6">
+    <h2 class="text-2xl font-semibold mb-4">Ingreso de Datos</h2>
+
+    <label class="font-semibold">
+        Datos separados por comas:
+    </label>
+
+    <textarea
+        id="manualData"
+        class="w-full border rounded-lg p-3 mt-2"
+        rows="5"
+        placeholder="10,12,15,18,20,22,25..."
+    ></textarea>
+
+    <div class="mt-4">
+        <label class="font-semibold">
+            O cargar archivo CSV/TXT:
+        </label>
+
+        <input
+            type="file"
+            id="fileInput"
+            accept=".csv,.txt"
+            class="mt-2"
+        >
+    </div>
+
+    <div class="mt-6">
+        <label class="font-semibold">
+            Distribución:
+        </label>
+
+        <select
+            id="distribution"
+            class="border p-2 rounded-lg ml-2"
+        >
+            <option>Uniforme</option>
+            <option>Triangular</option>
+            <option>Lineal</option>
+            <option>Uniforme por partes</option>
+            <option>Normal</option>
+        </select>
+
+        <button
+            onclick="processData()"
+            class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg ml-4"
+        >
+            Procesar
+        </button>
+    </div>
+</div>
+
+<!-- Parámetros -->
+<div class="card mb-6">
+    <h2 class="text-2xl font-semibold mb-4">
+        Parámetros Estimados
+    </h2>
+
+    <div id="parameters" class="text-slate-700"></div>
+</div>
+
+<!-- Interpretación -->
+<div class="card mb-6">
+    <h2 class="text-2xl font-semibold mb-4">
+        Interpretación Automática
+    </h2>
+
+    <div
+        id="interpretation"
+        class="bg-blue-50 border border-blue-200 p-4 rounded-lg"
+    ></div>
+</div>
+
+<!-- Gráficos -->
+<div class="grid lg:grid-cols-3 gap-6">
+
+    <div class="card">
+        <h3 class="font-bold mb-3 text-center">
+            Histograma
+        </h3>
+        <canvas id="histogramChart"></canvas>
+    </div>
+
+    <div class="card">
+        <h3 class="font-bold mb-3 text-center">
+            PDF Estimada
+        </h3>
+        <canvas id="pdfChart"></canvas>
+    </div>
+
+    <div class="card">
+        <h3 class="font-bold mb-3 text-center">
+            Histograma + PDF
+        </h3>
+        <canvas id="combinedChart"></canvas>
+    </div>
+
+</div>
+```
+
+</div>
+
+<script>
+
+//====================================================
+// VARIABLES GLOBALES
+//====================================================
+
+let histogramChart;
+let pdfChart;
+let combinedChart;
+
+//====================================================
+// LECTURA DE ARCHIVOS
+//====================================================
+
+document.getElementById("fileInput")
+.addEventListener("change", function(event){
+
+    const file = event.target.files[0];
+    if(!file) return;
+
+    const reader = new FileReader();
+
+    reader.onload = function(e){
+        document.getElementById("manualData").value =
+            e.target.result;
+    };
+
+    reader.readAsText(file);
+});
+
+//====================================================
+// FUNCIONES ESTADÍSTICAS
+//====================================================
+
+function mean(arr){
+    return arr.reduce((a,b)=>a+b,0)/arr.length;
+}
+
+function variance(arr){
+
+    const m = mean(arr);
+
+    return arr.reduce(
+        (s,x)=>s+(x-m)*(x-m),0
+    )/(arr.length-1);
+}
+
+function std(arr){
+    return Math.sqrt(variance(arr));
+}
+
+function skewness(arr){
+
+    const m = mean(arr);
+    const s = std(arr);
+
+    const n = arr.length;
+
+    return arr.reduce((sum,x)=>
+        sum + Math.pow((x-m)/s,3)
+    ,0)/n;
+}
+
+//====================================================
+// HISTOGRAMA
+//====================================================
+
+function buildHistogram(data,bins=10){
+
+    const min = Math.min(...data);
+    const max = Math.max(...data);
+
+    const width = (max-min)/bins;
+
+    const counts = new Array(bins).fill(0);
+
+    data.forEach(v=>{
+
+        let idx = Math.floor((v-min)/width);
+
+        if(idx===bins) idx=bins-1;
+
+        counts[idx]++;
+    });
+
+    const labels=[];
+
+    for(let i=0;i<bins;i++){
+
+        labels.push(
+            (min+i*width).toFixed(2)
+        );
+    }
+
+    return {
+        labels,
+        counts,
+        min,
+        max,
+        width
+    };
+}
+
+//====================================================
+// DISTRIBUCIONES
+//====================================================
+
+// NORMAL
+function normalPDF(x,mu,sigma){
+
+    return (
+        1/(sigma*Math.sqrt(2*Math.PI))
+    )*
+    Math.exp(
+        -Math.pow(x-mu,2)/(2*sigma*sigma)
+    );
+}
+
+// UNIFORME
+function uniformPDF(x,a,b){
+
+    if(x<a || x>b) return 0;
+
+    return 1/(b-a);
+}
+
+// TRIANGULAR
+function triangularPDF(x,a,c,b){
+
+    if(x<a || x>b) return 0;
+
+    if(x<=c){
+        return (2*(x-a))/((b-a)*(c-a));
+    }
+
+    return (2*(b-x))/((b-a)*(b-c));
+}
+
+// LINEAL
+function linearPDF(x,a,b){
+
+    if(x<a || x>b) return 0;
+
+    const norm = 2/((b-a)*(b-a));
+
+    return norm*(x-a);
+}
+
+// UNIFORME POR PARTES
+function piecewisePDF(x,a,m,b){
+
+    if(x<a || x>b) return 0;
+
+    if(x<=m){
+        return 0.6/(m-a);
+    }
+
+    return 0.4/(b-m);
+}
+
+//====================================================
+// PROCESAMIENTO PRINCIPAL
+//====================================================
+
+function processData(){
+
+    const raw =
+    document.getElementById("manualData")
+    .value;
+
+    const data = raw
+    .split(/[\s,;\n\r]+/)
+    .map(Number)
+    .filter(v=>!isNaN(v));
+
+    if(data.length<3){
+
+        alert("Ingrese al menos 3 datos.");
+
+        return;
+    }
+
+    const distribution =
+    document.getElementById("distribution")
+    .value;
+
+    const hist =
+    buildHistogram(data,10);
+
+    let paramsHTML="";
+    let interpretation="";
+
+    const pdfX=[];
+    const pdfY=[];
+
+    const min = hist.min;
+    const max = hist.max;
+
+    for(let i=0;i<200;i++){
+
+        pdfX.push(
+            min + (max-min)*i/199
+        );
+    }
+
+    //------------------------------------------------
+    // NORMAL
+    //------------------------------------------------
+
+    if(distribution==="Normal"){
+
+        const mu = mean(data);
+        const sigma = std(data);
+
+        paramsHTML=
+        `
+        <b>Media (μ):</b> ${mu.toFixed(4)} <br>
+        <b>Desviación estándar (σ):</b> ${sigma.toFixed(4)}
+        `;
+
+        pdfX.forEach(x=>
+            pdfY.push(
+                normalPDF(x,mu,sigma)
+            )
+        );
+
+        const sk = Math.abs(skewness(data));
+
+        interpretation =
+        sk<0.5
+        ?
+        "La asimetría es baja. Los datos parecen compatibles con una distribución Normal."
+        :
+        "La asimetría es considerable. La Normal podría no representar perfectamente los datos.";
+    }
+
+    //------------------------------------------------
+    // UNIFORME
+    //------------------------------------------------
+
+    if(distribution==="Uniforme"){
+
+        const a=min;
+        const b=max;
+
+        paramsHTML=
+        `
+        <b>Mínimo (a):</b> ${a.toFixed(4)} <br>
+        <b>Máximo (b):</b> ${b.toFixed(4)}
+        `;
+
+        pdfX.forEach(x=>
+            pdfY.push(
+                uniformPDF(x,a,b)
+            )
+        );
+
+        interpretation =
+        "La distribución Uniforme es razonable cuando las frecuencias observadas son relativamente homogéneas entre intervalos.";
+    }
+
+    //------------------------------------------------
+    // TRIANGULAR
+    //------------------------------------------------
+
+    if(distribution==="Triangular"){
+
+        const sorted=[...data]
+        .sort((a,b)=>a-b);
+
+        const a=sorted[0];
+        const b=sorted[sorted.length-1];
+
+        const c=mean(data);
+
+        paramsHTML=
+        `
+        <b>Mínimo (a):</b> ${a.toFixed(4)} <br>
+        <b>Moda estimada (c):</b> ${c.toFixed(4)} <br>
+        <b>Máximo (b):</b> ${b.toFixed(4)}
+        `;
+
+        pdfX.forEach(x=>
+            pdfY.push(
+                triangularPDF(x,a,c,b)
+            )
+        );
+
+        interpretation =
+        "La distribución Triangular es apropiada cuando existe una tendencia central dominante y los datos decrecen hacia los extremos.";
+    }
+
+    //------------------------------------------------
+    // LINEAL
+    //------------------------------------------------
+
+    if(distribution==="Lineal"){
+
+        const a=min;
+        const b=max;
+
+        paramsHTML=
+        `
+        <b>Límite inferior:</b> ${a.toFixed(4)} <br>
+        <b>Límite superior:</b> ${b.toFixed(4)}
+        `;
+
+        pdfX.forEach(x=>
+            pdfY.push(
+                linearPDF(x,a,b)
+            )
+        );
+
+        interpretation =
+        "La distribución Lineal supone que la densidad aumenta progresivamente dentro del intervalo observado.";
+    }
+
+    //------------------------------------------------
+    // UNIFORME POR PARTES
+    //------------------------------------------------
+
+    if(distribution==="Uniforme por partes"){
+
+        const a=min;
+        const b=max;
+        const m=(a+b)/2;
+
+        paramsHTML=
+        `
+        <b>Intervalo 1:</b> [${a.toFixed(2)}, ${m.toFixed(2)}] <br>
+        <b>Intervalo 2:</b> [${m.toFixed(2)}, ${b.toFixed(2)}]
+        `;
+
+        pdfX.forEach(x=>
+            pdfY.push(
+                piecewisePDF(x,a,m,b)
+            )
+        );
+
+        interpretation =
+        "La distribución uniforme por partes divide el dominio en segmentos con diferentes densidades constantes.";
+    }
+
+    document.getElementById("parameters")
+    .innerHTML=paramsHTML;
+
+    document.getElementById("interpretation")
+    .innerHTML=interpretation;
+
+    drawCharts(hist,pdfX,pdfY,data.length);
+}
+
+//====================================================
+// GRAFICAR
+//====================================================
+
+function drawCharts(hist,pdfX,pdfY,n){
+
+    if(histogramChart)
+        histogramChart.destroy();
+
+    if(pdfChart)
+        pdfChart.destroy();
+
+    if(combinedChart)
+        combinedChart.destroy();
+
+    //------------------------------------------------
+    // HISTOGRAMA
+    //------------------------------------------------
+
+    histogramChart =
+    new Chart(
+        document.getElementById("histogramChart"),
+        {
+            type:"bar",
+            data:{
+                labels:hist.labels,
+                datasets:[{
+                    label:"Frecuencia",
+                    data:hist.counts,
+                    backgroundColor:
+                    "rgba(59,130,246,0.7)"
+                }]
+            }
+        }
+    );
+
+    //------------------------------------------------
+    // PDF
+    //------------------------------------------------
+
+    pdfChart =
+    new Chart(
+        document.getElementById("pdfChart"),
+        {
+            type:"line",
+            data:{
+                labels:pdfX,
+                datasets:[{
+                    label:"PDF",
+                    data:pdfY,
+                    borderColor:"red",
+                    fill:false,
+                    tension:0.3
+                }]
+            },
+            options:{
+                scales:{
+                    x:{
+                        ticks:{
+                            display:false
+                        }
+                    }
+                }
+            }
+        }
+    );
+
+    //------------------------------------------------
+    // COMBINADO
+    //------------------------------------------------
+
+    const densityCounts =
+    pdfX.map(v=>
+        pdfY[pdfX.indexOf(v)]
+        * n
+        * hist.width
+    );
+
+    combinedChart =
+    new Chart(
+        document.getElementById("combinedChart"),
+        {
+            data:{
+                labels:pdfX,
+
+                datasets:[
+
+                {
+                    type:"bar",
+                    label:"Histograma",
+                    data:
+                    pdfX.map(x=>{
+
+                        const idx =
+                        Math.floor(
+                        (x-hist.min)/
+                        hist.width
+                        );
+
+                        return (
+                            hist.counts[
+                            Math.min(
+                            Math.max(idx,0),
+                            hist.counts.length-1
+                            )
+                            ]
+                        );
+                    }),
+                    backgroundColor:
+                    "rgba(59,130,246,0.35)"
+                },
+
+                {
+                    type:"line",
+                    label:"PDF Escalada",
+                    data:densityCounts,
+                    borderColor:"red",
+                    borderWidth:3,
+                    pointRadius:0,
+                    tension:0.25
+                }
+
+                ]
+            }
+        }
+    );
+}
+
+</script>
+
+</body>
+</html>
